@@ -1,0 +1,13 @@
+[package]
+name = "backend"
+version = "0.1.0"
+authors = ["André Krüger <222393+akrger@users.noreply.github.com>"]
+edition = "2018"
+
+[workspace]
+members = [
+       "dashboard",
+]
+
+[dependencies]
+actix-web = "3"

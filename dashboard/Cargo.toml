@@ -1,0 +1,9 @@
+[package]
+name = "dashboard"
+version = "0.1.0"
+authors = ["André Krüger <222393+akrger@users.noreply.github.com>"]
+edition = "2018"
+
+[dependencies]
+backend = {path = "../" }
+actix-web = "3"
