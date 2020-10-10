@@ -18,7 +18,10 @@
   },
   "homepage": "https://github.com/akrger/postcard-website#readme",
   "dependencies": {
-    "react": "16.13.1"
+    "bootstrap": "4.5.2",
+    "react": "16.13.1",
+    "react-bootstrap": "1.3.0",
+    "react-dom": "16.13.1"
   },
   "eslintConfig": {
     "root": true,
@@ -44,11 +47,16 @@
   "devDependencies": {
     "@commitlint/cli": "11.0.0",
     "@commitlint/config-conventional": "11.0.0",
+    "@types/bootstrap": "5.0.0",
     "@types/react": "16.9.51",
+    "@types/react-bootstrap": "0.32.24",
+    "@types/react-dom": "16.9.8",
     "@typescript-eslint/eslint-plugin": "4.4.0",
     "@typescript-eslint/parser": "4.4.0",
+    "css-loader": "4.3.0",
     "eslint": "7.10.0",
     "husky": "4.3.0",
+    "style-loader": "1.3.0",
     "typescript": "4.0.3",
     "webpack": "4.44.2",
     "webpack-cli": "3.3.12"

@@ -5,5 +5,11 @@ authors = ["André Krüger <222393+akrger@users.noreply.github.com>"]
 edition = "2018"
 
 [dependencies]
-backend = {path = "../" }
+backend = {path = "../backend" }
 actix-web = "3"
+tera = "1"
+diesel = { version = "1.4.5", features = ["postgres"] }
+actix-http = "2"
+env_logger = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
