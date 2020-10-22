@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "preinstall": "npx only-allow pnpm",
-    "dev": "webpack-dev-server",
+    "dev": "webpack serve --mode=development",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -20,11 +20,12 @@
   "homepage": "https://github.com/akrger/postcard-website#readme",
   "dependencies": {
     "history": "5.0.0",
-    "path-to-regexp": "6.2.0"
+    "mobx": "6.0.1",
+    "mobx-react-lite": "3.0.0",
+    "path-to-regexp": "6.2.0",
+    "@postcard-website/common": "0.1.0"
   },
   "devDependencies": {
-    "@types/history": "4.7.8",
-    "ts-loader": "8.0.4",
-    "webpack-dev-server": "3.11.0"
+    "@types/history": "4.7.8"
   }
 }
