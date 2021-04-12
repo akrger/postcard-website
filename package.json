@@ -1,1 +1,15 @@
-{"name":"postcard-website","workspaces":["dashboard"],"dependencies":{"react":"17.0.1"}}
+{
+  "scripts": {},
+  "devDependencies": {
+    "@graphql-cli/codegen": "1.17.22",
+    "@graphql-codegen/schema-ast": "1.18.1",
+    "graphql-cli": "4.1.0",
+    "prettier": "2.2.1"
+  },
+  "workspaces": [
+    "./dashboard/frontend/*"
+  ],
+  "dependencies": {
+    "react": "17.0.2"
+  }
+}
