@@ -8,7 +8,7 @@ use async_graphql::{OutputType, SimpleObject};
 use async_graphql_warp::{graphql_subscription_with_data, Response};
 use async_redis_session::RedisSessionStore;
 use futures::{stream, Stream};
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqlitePoolOptions, SqliteRow};
 use std::convert::Infallible;
 use std::io;
 use std::rc::Rc;
@@ -48,13 +48,207 @@ struct Diff {
 }
 
 use async_graphql::connection::Edge;
-use sqlx::{Pool, Sqlite, SqliteConnection, SqlitePool};
+use sqlx::{FromRow, Pool, Row, Sqlite, SqliteConnection, SqlitePool};
+use std::io::Error;
+
+pub trait CoolStuff {
+    fn id(&self) -> u32;
+}
 
 #[derive(SimpleObject)]
 struct MyConnection<T: Sync + std::marker::Send + OutputType> {
     edges: Vec<Edge<usize, T, EmptyFields>>,
     totalCount: usize,
     page_info: PageInfo,
+}
+
+impl CoolStuff for Post {
+    fn id(&self) -> u32 {
+        self.id
+    }
+}
+
+async fn stuff<'a, T: CoolStuff + for<'r> FromRow<'r, SqliteRow> + OutputType + Unpin>(
+    after: Option<String>,
+    before: Option<String>,
+    first: Option<i32>,
+    last: Option<i32>,
+    query: String,
+    x: &SqlitePool,
+) -> Result<MyConnection<T>, async_graphql::Error> {
+    query_with(
+        after,
+        before,
+        first,
+        last,
+        |after, before, first, last| async move {
+            let totalCount: (u32,) = sqlx::query_as("SELECT COUNT(*) from posts")
+                .fetch_one(x)
+                .await
+                .unwrap();
+            let mut rows: Vec<T> = vec![];
+            let mut has_previous_page = false;
+            let mut has_next_page = false;
+            let mut start_cursor = 0;
+            let mut end_cursor = 0;
+            let mut should_reverse = false;
+            match (after, before, first, last) {
+                (_, _, Some(first), Some(last)) => {
+                    return Err("not allowed".into());
+                } // not allowed
+                (Some(after), Some(before), Some(first), _) => {
+                    return Err("not allowed".into());
+                }
+                (Some(after), Some(before), _, Some(last)) => {
+                    return Err("not allowed".into());
+                }
+                (Some(after), Some(before), None, None) => {
+                    return Err("not allowed".into());
+                }
+                (None, Some(before), Some(first), None) => {
+                    return Err("not allowed".into());
+                }
+                (Some(after), None, None, None) => {
+                    return Err("not allowed".into());
+                }
+                (None, Some(before), None, None) => {
+                    return Err("not allowed".into());
+                }
+                (Some(after), None, None, Some(last)) => {
+                    return Err("not allowed".into());
+                }
+                (None, None, Some(first), None) => {
+                    rows = sqlx::query_as(
+                        format!("{query} order by id ASC LIMIT ?;", query = query).as_str(),
+                    )
+                    .bind(first as u32)
+                    .fetch_all(x)
+                    .await
+                    .unwrap();
+                    has_previous_page = false;
+                    has_next_page = totalCount.0 as usize > first;
+                    if let Some(i) = rows.first() {
+                        // let b = T {};
+                        // let xx = b.id;
+                        start_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                    if let Some(i) = rows.last() {
+                        end_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                }
+                (None, None, None, Some(last)) => {
+                    rows = sqlx::query_as::<_, T>(
+                        format!(
+                            "SELECT * from {table} order by id DESC LIMIT ?;",
+                            table = "posts"
+                        )
+                        .as_str(),
+                    )
+                    .bind(last as u32)
+                    .fetch_all(x)
+                    .await
+                    .unwrap();
+                    should_reverse = true;
+                    has_previous_page = totalCount.0 as usize > last;
+                    has_next_page = false;
+                    if let Some(i) = rows.first() {
+                        end_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                    if let Some(i) = rows.last() {
+                        start_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                }
+                (Some(after), None, Some(first), None) => {
+                    let _has_previous_page: (bool,) =
+                        sqlx::query_as("SELECT COUNT(*) from posts where id <= ?")
+                            .bind(after as u32)
+                            .fetch_one(x)
+                            .await
+                            .unwrap();
+                    has_next_page = totalCount.0 as usize > first;
+                    has_previous_page = _has_previous_page.0;
+                    rows = sqlx::query_as::<_, T>(
+                        format!(
+                            "SELECT * from {table} where id > ? order by id ASC LIMIT ?;",
+                            table = "posts"
+                        )
+                        .as_str(),
+                    )
+                    .bind(after as u32)
+                    .bind(first as u32)
+                    .fetch_all(x)
+                    .await
+                    .unwrap();
+                    if let Some(i) = rows.first() {
+                        start_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                    if let Some(i) = rows.last() {
+                        end_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                }
+                (None, Some(before), None, Some(last)) => {
+                    let _has_next_page: (bool,) =
+                        sqlx::query_as("SELECT COUNT(*) from posts where id >= ?")
+                            .bind(before as u32)
+                            .fetch_one(x)
+                            .await
+                            .unwrap();
+                    has_next_page = _has_next_page.0;
+                    has_previous_page = (totalCount.0 as usize) > last;
+                    rows = sqlx::query_as::<_, T>(
+                        format!(
+                            "SELECT * from {table} where id < ? order by id DESC LIMIT ?;",
+                            table = "posts"
+                        )
+                        .as_str(),
+                    )
+                    .bind(before as u32)
+                    .bind(last as u32)
+                    .fetch_all(x)
+                    .await
+                    .unwrap();
+                    should_reverse = true;
+                }
+                _ => {
+                    rows = sqlx::query_as::<_, T>(
+                        format!("SELECT * from {table} order by id ASC;", table = "posts").as_str(),
+                    )
+                    .fetch_all(x)
+                    .await
+                    .unwrap();
+                    if let Some(i) = rows.first() {
+                        start_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                    if let Some(i) = rows.last() {
+                        end_cursor = (CoolStuff::id(i)) as usize;
+                    }
+                } // return everything
+            };
+            let mut edges = rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| Edge::new((CoolStuff::id(&item)) as usize, item))
+                .collect::<Vec<Edge<usize, T, EmptyFields>>>();
+            if should_reverse {
+                edges.reverse();
+            }
+            // before.unwrap_or((totalCount.0 - 1) as usize);
+            // Won't work without this line O_O
+            after.unwrap_or(0);
+            let mut connection = MyConnection {
+                edges,
+                totalCount: totalCount.0 as usize,
+                page_info: PageInfo {
+                    has_previous_page,
+                    has_next_page,
+                    start_cursor: Some(start_cursor.encode_cursor()),
+                    end_cursor: Some(end_cursor.encode_cursor()),
+                },
+            };
+            Ok(connection)
+        },
+    )
+    .await
 }
 
 #[Object]
@@ -80,183 +274,7 @@ impl QueryRoot {
         last: Option<i32>,
     ) -> Result<MyConnection<Post>> {
         let x = ctx.data::<SqlitePool>().unwrap();
-
-        query_with(
-            after,
-            before,
-            first,
-            last,
-            |after, before, first, last| async move {
-                let totalCount: (u32,) = sqlx::query_as("SELECT COUNT(*) from posts")
-                    .fetch_one(x)
-                    .await
-                    .unwrap();
-                let mut rows: Vec<Post> = vec![];
-                let mut has_previous_page = false;
-                let mut has_next_page = false;
-                let mut start_cursor = 0;
-                let mut end_cursor = 0;
-                let mut should_reverse = false;
-                match (after, before, first, last) {
-                    (_, _, Some(first), Some(last)) => {
-                        return Err("not allowed".into());
-                    } // not allowed
-                    (Some(after), Some(before), Some(first), _) => {
-                        return Err("not allowed".into());
-                    }
-                    (Some(after), Some(before), _, Some(last)) => {
-                        return Err("not allowed".into());
-                    }
-                    (Some(after), Some(before), None, None) => {
-                        return Err("not allowed".into());
-                    }
-                    (None, Some(before), Some(first), None) => {
-                        return Err("not allowed".into());
-                    }
-                    (Some(after), None, None, None) => {
-                        return Err("not allowed".into());
-                    }
-                    (None, Some(before), None, None) => {
-                        return Err("not allowed".into());
-                    }
-                    (Some(after), None, None, Some(last)) => {
-                        return Err("not allowed".into());
-                    }
-                    (None, None, Some(first), None) => {
-                        rows = sqlx::query_as::<_, Post>(
-                            format!(
-                                "SELECT * from {table} order by id ASC LIMIT ?;",
-                                table = "posts"
-                            )
-                            .as_str(),
-                        )
-                        .bind(first as u32)
-                        .fetch_all(x)
-                        .await
-                        .unwrap();
-                        has_previous_page = false;
-                        has_next_page = totalCount.0 as usize > first;
-                        if let Some(i) = rows.first() {
-                            start_cursor = (i.id) as usize;
-                        }
-                        if let Some(i) = rows.last() {
-                            end_cursor = (i.id) as usize;
-                        }
-                    }
-                    (None, None, None, Some(last)) => {
-                        rows = sqlx::query_as::<_, Post>(
-                            format!(
-                                "SELECT * from {table} order by id DESC LIMIT ?;",
-                                table = "posts"
-                            )
-                            .as_str(),
-                        )
-                        .bind(last as u32)
-                        .fetch_all(x)
-                        .await
-                        .unwrap();
-                        should_reverse = true;
-                        has_previous_page = totalCount.0 as usize > last;
-                        has_next_page = false;
-                        if let Some(i) = rows.first() {
-                            end_cursor = (i.id) as usize;
-                        }
-                        if let Some(i) = rows.last() {
-                            start_cursor = (i.id) as usize;
-                        }
-                    }
-                    (Some(after), None, Some(first), None) => {
-                        let _has_previous_page: (bool,) =
-                            sqlx::query_as("SELECT COUNT(*) from posts where id <= ?")
-                                .bind(after as u32)
-                                .fetch_one(x)
-                                .await
-                                .unwrap();
-                        has_next_page = totalCount.0 as usize > first;
-                        has_previous_page = _has_previous_page.0;
-                        rows = sqlx::query_as::<_, Post>(
-                            format!(
-                                "SELECT * from {table} where id > ? order by id ASC LIMIT ?;",
-                                table = "posts"
-                            )
-                            .as_str(),
-                        )
-                        .bind(after as u32)
-                        .bind(first as u32)
-                        .fetch_all(x)
-                        .await
-                        .unwrap();
-                        if let Some(i) = rows.first() {
-                            start_cursor = (i.id) as usize;
-                        }
-                        if let Some(i) = rows.last() {
-                            end_cursor = (i.id) as usize;
-                        }
-                    }
-                    (None, Some(before), None, Some(last)) => {
-                        let _has_next_page: (bool,) =
-                            sqlx::query_as("SELECT COUNT(*) from posts where id >= ?")
-                                .bind(before as u32)
-                                .fetch_one(x)
-                                .await
-                                .unwrap();
-                        has_next_page = _has_next_page.0;
-                        has_previous_page = (totalCount.0 as usize) > last;
-                        rows = sqlx::query_as::<_, Post>(
-                            format!(
-                                "SELECT * from {table} where id < ? order by id DESC LIMIT ?;",
-                                table = "posts"
-                            )
-                            .as_str(),
-                        )
-                        .bind(before as u32)
-                        .bind(last as u32)
-                        .fetch_all(x)
-                        .await
-                        .unwrap();
-                        should_reverse = true;
-                    }
-                    _ => {
-                        rows = sqlx::query_as::<_, Post>(
-                            format!("SELECT * from {table} order by id ASC;", table = "posts")
-                                .as_str(),
-                        )
-                        .fetch_all(x)
-                        .await
-                        .unwrap();
-                        if let Some(i) = rows.first() {
-                            start_cursor = (i.id) as usize;
-                        }
-                        if let Some(i) = rows.last() {
-                            end_cursor = (i.id) as usize;
-                        }
-                    } // return everything
-                };
-                let mut edges = rows
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, item)| Edge::new(item.id as usize, item))
-                    .collect::<Vec<Edge<usize, Post, EmptyFields>>>();
-                if should_reverse {
-                    edges.reverse();
-                }
-                // before.unwrap_or((totalCount.0 - 1) as usize);
-                // Won't work without this line O_O
-                after.unwrap_or(0);
-                let mut connection = MyConnection {
-                    edges,
-                    totalCount: totalCount.0 as usize,
-                    page_info: PageInfo {
-                        has_previous_page,
-                        has_next_page,
-                        start_cursor: Some(start_cursor.encode_cursor()),
-                        end_cursor: Some(end_cursor.encode_cursor()),
-                    },
-                };
-                Ok(connection)
-            },
-        )
-        .await
+        stuff::<Post>(after, before, first, last, "select * from posts".into(), x).await
     }
 }
 

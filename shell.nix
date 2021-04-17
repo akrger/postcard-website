@@ -25,7 +25,7 @@ stdenv.mkDerivation {
     nixfmt
 
     pkgs.nodejs-15_x
-    rust
+#    rust
     pkgconfig
     openssl
     # to use a specific nighly:
