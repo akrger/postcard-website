@@ -62,10 +62,40 @@ struct MyConnection<T: Sync + std::marker::Send + OutputType> {
     page_info: PageInfo,
 }
 
+macro_rules! query_stuff {
+    ($param:literal,$pool:expr) => {
+        sqlx::query!("select * from " + $param)
+        // .fetch_all($pool)
+        // .await
+        // .unwrap()
+    };
+}
+
 impl CoolStuff for Post {
     fn id(&self) -> u32 {
         self.id
     }
+}
+
+struct Post2 {
+    id: i64,
+    title: Option<String>,
+}
+
+macro_rules! query_with {
+    ($entity:ident,$pool:expr, $table_name:literal) => {
+        // sqlx::query_as!($entity, "select * from " + $table_name)
+        //     .fetch_all($pool)
+        //     .await
+        //     .unwrap()
+        query_with!($entity, $pool, $table_name, None)
+    };
+    ($entity:ident,$pool:expr, $table_name:literal, $join:expr) => {
+        sqlx::query_as!($entity, "select * from " + $table_name)
+            .fetch_all($pool)
+            .await
+            .unwrap()
+    };
 }
 
 async fn stuff<'a, T: CoolStuff + for<'r> FromRow<'r, SqliteRow> + OutputType + Unpin>(
@@ -76,6 +106,12 @@ async fn stuff<'a, T: CoolStuff + for<'r> FromRow<'r, SqliteRow> + OutputType + 
     query: String,
     x: &SqlitePool,
 ) -> Result<MyConnection<T>, async_graphql::Error> {
+    query_with!(Post2, x, "posts", "users");
+    if query == "test" {
+        query_with!(Post2, x, "posts");
+    } else {
+        query_with!(Post2, x, "posts");
+    }
     query_with(
         after,
         before,
